@@ -25,7 +25,7 @@ def load(raw) -> dict:
     if not isinstance(data, dict):
         data = {}
     card = empty()
-    card["subject"] = str(data.get("subject") or "")[:40]
+    card["subject"] = str(data.get("subject") or "")[:80]
     card["keep"] = _clean(data.get("keep"))
     card["size"] = str(data.get("size") or "")[:16]
     card["image"] = str(data.get("image") or "")[:80]
@@ -39,6 +39,17 @@ def line(card: dict) -> str:
         return ""
     size = (card or {}).get("size") or ""
     return "当前：" + subject + (("，" + size) if size else "")
+
+
+def merge_request(spoken: str, understood: str) -> str:
+    """用户原话在前，模型补上的是这段对话里已经确定的内容。"""
+    spoken = (spoken or "").strip()
+    understood = (understood or "").strip()
+    if not understood:
+        return spoken
+    if not spoken or spoken in understood:
+        return understood
+    return spoken + "\n" + understood
 
 
 def subject_from(text: str) -> str:

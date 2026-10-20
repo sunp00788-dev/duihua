@@ -136,16 +136,25 @@ def _basis_text(basis: str, history: list, current: str) -> str:
 
 
 def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict, has_previous: bool, has_refs: bool, uploads: list, urls: list) -> dict | None:
-    """The language model only chooses the task. The picture prompt stays the user's words."""
+    """读这段对话和记忆，决定是回答还是生图。提示词以用户原话开头。"""
     intent, tried = llm.classify(API_KEY, BASE_URL, llm.build_user_text(text, history[:-1], ui, has_previous))
     if not intent:
         return None
     if intent["action"] == "chat":
         return {
-            "plan": {"action": "chat", "reply": intent.get("reply") or "好。", "prompt": "", "use_previous_image": False, "keep": intent.get("keep") or [], "change": intent.get("change") or []},
+            "plan": {
+                "action": "chat",
+                "reply": intent.get("reply") or "想画什么，直接说就行。",
+                "prompt": "",
+                "use_previous_image": False,
+                "keep": intent.get("keep") or [],
+                "change": intent.get("change") or [],
+                "memory": intent.get("memory") or "",
+                "conversation": True,
+            },
             "tried": tried,
             "editing": False,
-            "fresh": True,
+            "fresh": False,
             "size_only": False,
             "source_image": "",
         }
@@ -153,13 +162,16 @@ def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict,
     canvas = intent["canvas"]
     photo = intent["medium"] == "photo"
     model = ui.get("image_model") or ""
-    reply = intent.get("reply") or "按你的要求处理。"
+    reply = intent.get("reply") or "好，按这个来画。"
+    ask = memory.merge_request(text, intent.get("prompt") or "")
     previous = last_generated(user["id"], chat_id) if has_previous else None
     ref_count = len(uploads) + len(urls)
 
     def pack(plan: dict, editing: bool = False, fresh: bool = False, size_only: bool = False, source: str = "", ui_size: str = "", resolution: str = "") -> dict:
         plan["keep"] = intent.get("keep") or []
         plan["change"] = intent.get("change") or []
+        plan["memory"] = intent.get("memory") or ""
+        plan["conversation"] = True
         return {
             "plan": plan,
             "tried": tried,
@@ -173,7 +185,7 @@ def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict,
 
     if task == "new":
         return pack(
-            {"action": "generate", "reply": reply, "prompt": image.faithful_prompt(text, photo), "use_previous_image": False},
+            {"action": "generate", "reply": reply, "prompt": image.faithful_prompt(ask, photo), "use_previous_image": False},
             fresh=True,
         )
     if task == "realism":
@@ -191,7 +203,7 @@ def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict,
         return pack(
             {
                 "action": "generate",
-                "reply": "按上一张图只改尺寸，画面内容保持不变。",
+                "reply": reply or "按上一张图只改尺寸，画面内容保持不变。",
                 "prompt": size_only_prompt(previous.get("prompt") or "", text),
                 "use_previous_image": True,
             },
@@ -208,7 +220,7 @@ def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict,
             {
                 "action": "generate",
                 "reply": reply,
-                "prompt": composite_prompt(model, text, ref_count, task == "swap_person"),
+                "prompt": composite_prompt(model, ask, ref_count, task == "swap_person"),
                 "use_previous_image": True,
             },
             editing=True,
@@ -216,7 +228,7 @@ def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict,
             ui_size=previous.get("size") or "",
         )
     if canvas == "upload" or (has_refs and canvas != "previous"):
-        prompt = reference_prompt(model, text, ref_count) if task == "text" else edit_prompt(model, text, ref_count)
+        prompt = reference_prompt(model, ask, ref_count) if task == "text" else edit_prompt(model, ask, ref_count)
         return pack(
             {"action": "generate", "reply": reply, "prompt": prompt, "use_previous_image": False},
             fresh=True,
@@ -227,7 +239,7 @@ def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict,
             {
                 "action": "generate",
                 "reply": reply,
-                "prompt": edit_prompt(model, text, ref_count),
+                "prompt": edit_prompt(model, ask, ref_count),
                 "use_previous_image": True,
             },
             editing=True,
@@ -534,13 +546,14 @@ class Handler(BaseHTTPRequestHandler):
         ui["model_auto"] = chosen_model not in image.ALLOWED_MODELS
         use_llm = body.get("use_llm") is not False
         history = []
-        for message in store.list_messages(user["id"], chat_id)[-8:]:
+        for message in store.list_messages(user["id"], chat_id)[-16:]:
             item = message["body"]
+            info = item.get("image") or {}
             history.append(
                 {
                     "role": message["role"],
                     "text": item.get("text") or "",
-                    "prompt": item.get("prompt") or "",
+                    "image": bool(info.get("local_names") or info.get("status") == "PENDING"),
                 }
             )
         has_previous = any((message["body"].get("image") or {}).get("local_names") for message in store.list_messages(user["id"], chat_id))
@@ -550,14 +563,9 @@ class Handler(BaseHTTPRequestHandler):
         size_only = False
         fresh = False
         editing = False
-        direct_draw = (
-            not annotated
-            and not source_image
-            and not has_refs
-            and image.is_direct_generate(text)
-        )
         routed = None
-        if use_llm and not annotated and not source_image and not direct_draw:
+        if use_llm and not annotated and not source_image:
+            ui["memory"] = memory.load(store.read_memory(chat_id)).get("subject") or ""
             routed = resolve_intent(user, chat_id, text, history, ui, has_previous, has_refs, uploads, urls)
         if routed:
             plan = routed['plan']
@@ -628,6 +636,8 @@ class Handler(BaseHTTPRequestHandler):
             plan["prompt"] = text[:4000]
             plan["reply"] = plan.get("reply") or "按你的标注修改。"
         if plan["action"] == "chat":
+            if plan.get("conversation"):
+                _save_conversation_memory(chat_id, plan, fresh=False, text=text, size="")
             message = store.add_message(
                 chat_id,
                 user["id"],
@@ -705,13 +715,16 @@ class Handler(BaseHTTPRequestHandler):
                 prompt = (prompt.rstrip() + "\n" + extra).strip()
                 plan["reply"] = ((plan.get("reply") or "") + " 原话之外补了几句画面细节。").strip()
         remembered = memory.load(store.read_memory(chat_id))
-        sources = [text] + [item.get("text") or "" for item in history]
-        keep, change = memory.pick(text, plan.get("keep"), plan.get("change"), sources, editing=not fresh)
-        if not fresh and not re.search(r"(换成|改成|不要|去掉|删除)", text):
-            keep = memory.merge(keep, remembered.get("keep") or [], change)
-        prompt = memory.attach(prompt, keep, change)
-        plan["reply"] = memory.with_reply(plan.get("reply") or "", keep, change)
-        plan["_memory_keep"] = keep
+        if plan.get("conversation"):
+            plan["_memory_keep"] = plan.get("keep") or remembered.get("keep") or []
+        else:
+            sources = [text] + [item.get("text") or "" for item in history]
+            keep, change = memory.pick(text, plan.get("keep"), plan.get("change"), sources, editing=not fresh)
+            if not fresh and not re.search(r"(换成|改成|不要|去掉|删除)", text):
+                keep = memory.merge(keep, remembered.get("keep") or [], change)
+            prompt = memory.attach(prompt, keep, change)
+            plan["reply"] = memory.with_reply(plan.get("reply") or "", keep, change)
+            plan["_memory_keep"] = keep
         model = ui["image_model"] if ui["image_model"] in image.ALLOWED_MODELS else image.IMAGE_MODELS[0]["id"]
         if ui.get("model_auto"):
             plan["reply"] = ((plan.get("reply") or "") + f" 这类任务自动用了 {image.model_label(model)}。").strip()
@@ -738,13 +751,7 @@ class Handler(BaseHTTPRequestHandler):
             count = 1
         if count not in (1, 2, 4):
             count = 1
-        store.write_memory(
-            chat_id,
-            json.dumps(
-                memory.updated(remembered, fresh=fresh, text=text, keep=plan.get("_memory_keep") or [], size=size or ""),
-                ensure_ascii=False,
-            ),
-        )
+        _save_conversation_memory(chat_id, plan, fresh=fresh, text=text, size=size or "")
         try:
             image_urls = forced_refs if forced_refs else collect_refs(
                 user["id"],
@@ -1296,6 +1303,22 @@ def _requested_label(text: str, ui_size: str) -> str:
 def _size_rejected(exc: image.ImageError) -> bool:
     text = str(exc).lower()
     return any(word in text for word in ("size", "ratio", "aspect", "比例", "尺寸"))
+
+
+def _save_conversation_memory(chat_id: str, plan: dict, fresh: bool, text: str, size: str) -> None:
+    card = memory.updated(
+        memory.load(store.read_memory(chat_id)),
+        fresh=fresh,
+        text=text,
+        keep=plan.get("_memory_keep") or plan.get("keep") or [],
+        size=size or "",
+    )
+    note = str(plan.get("memory") or "").strip()
+    if note:
+        card["subject"] = note[:80]
+    elif plan.get("conversation") and not card.get("subject"):
+        card["subject"] = memory.subject_from(text)
+    store.write_memory(chat_id, json.dumps(card, ensure_ascii=False))
 
 
 def present_chat(row: dict | None) -> dict | None:

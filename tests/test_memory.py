@@ -44,6 +44,25 @@ def re_search_replace(text):
     return re.search(r"(换成|改成|不要|去掉|删除)", text)
 
 
+def test_merge_keeps_user_words_first():
+    merged = memory.merge_request("暗一点", "白猫和窗户保持不变，只把光线改暗")
+    check("spoken stays first", merged.startswith("暗一点"))
+    check("memory folded in", "白猫和窗户" in merged)
+    same = memory.merge_request("暗一点", "暗一点，白猫不动")
+    check("no duplicate when already included", same == "暗一点，白猫不动")
+
+
+def test_turn_json():
+    import llm
+
+    parsed = llm.parse_intent(
+        '{"action":"generate","reply":"好，猫不动，只把光线压暗。","task":"edit","canvas":"previous","memory":"雨夜窗边的白猫，光线偏暗","prompt":"白猫和窗户保持，只把光线改暗","use_previous_image":true}'
+    )
+    check("reply is dialogue", parsed["reply"].startswith("好"))
+    check("memory kept", "白猫" in parsed["memory"])
+    check("edit uses previous", parsed["use_previous_image"] is True)
+
+
 def test_line_and_subject():
     card = memory.updated(memory.empty(), fresh=True, text="生成雨夜窗边的白猫，电影光", keep=["白猫"], size="3:2")
     check("subject trimmed", card["subject"] == "雨夜窗边的白猫")
@@ -56,6 +75,8 @@ if __name__ == "__main__":
     test_drops_invented_words()
     test_prompt_starts_with_user_words()
     test_replace_does_not_carry_old_keep()
+    test_merge_keeps_user_words_first()
+    test_turn_json()
     test_line_and_subject()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     raise SystemExit(1 if FAIL else 0)

@@ -176,14 +176,14 @@ def build_user_text(text: str, history: list[dict], ui: dict, has_previous: bool
         f"指定要修改的已生成图片：{ui.get('source_image') or '无'}",
         f"是否已有上一张图：{'是' if has_previous else '否'}",
         f"本轮参考图数量：{ui.get('attachment_count') or 0}",
+        f"当前记忆：{ui.get('memory') or '还没有'}",
         "最近对话：",
     ]
-    for item in history[-6:]:
+    for item in history[-12:]:
         role = "用户" if item.get("role") == "user" else "助手"
-        snippet = (item.get("text") or "")[:400]
-        prompt = item.get("prompt") or ""
-        if prompt:
-            snippet += f"（当时的完整提示词：{prompt[:800]}）"
+        snippet = (item.get("text") or "")[:500]
+        if item.get("image"):
+            snippet += "（这一轮已经生成了图）"
         lines.append(f"{role}：{snippet}")
     lines.append("本轮用户：" + text[:2000])
     return "\n".join(lines)
@@ -433,21 +433,31 @@ def _as_bool(value) -> bool:
     return bool(value)
 
 
-INTENT = """你只判断用户要做什么。只输出一个 JSON，不要写画面，不要改写景物。
+INTENT = """你是「对画」的对话助手。先理解这一段对话，再决定是接着聊，还是调用生图。只输出一个 JSON。
 
-{"action":"generate"|"chat","reply":"一句话","task":"new"|"edit"|"text"|"swap_person"|"insert"|"realism"|"size","canvas":"none"|"previous"|"upload","medium":"photo"|"keep","basis":"","keep":[],"change":[]}
+{"action":"generate"|"chat","reply":"对用户说的话","task":"new"|"edit"|"text"|"swap_person"|"insert"|"realism"|"size","canvas":"none"|"previous"|"upload","medium":"photo"|"keep","basis":"","use_previous_image":false,"memory":"","prompt":"","keep":[],"change":[]}
 
-判断：
-- 用户要一张新图，task=new，canvas=none。对话里已经有图也不要改上一张，除非用户明确在改那张。
-- 上图、上一张、上面那张、原图，指已经生成的图，canvas=previous。
-- 上传图里的人去替换或放进上一张：task=swap_person 或 insert，canvas=previous。上传图不是画布。
-- 上传的海报、商品图要改字或改局部，task=text 或 edit，canvas=upload。
-- 用户说太假、不真实、要写真、要真实：task=realism，canvas=none，medium=photo。basis 必须是历史用户原话里的那句作图要求，原样摘录，不要摘「太假了」。没有就空字符串。
-- 写真、实拍、照片、真实、逼真：medium=photo。动漫、插画、水墨、海报版式：medium=keep。
-- 只改尺寸或比例：task=size，canvas=previous。
-- 闲聊或先别画：action=chat，task=new，basis 空。
-- basis 只能是用户说过的连续原文，禁止编造。reply 不要复述画面细节。
-- keep 是用户明确说要保留的短词，change 是明确要改的短词。每项不超过 12 个字，最多 3 项，必须能在用户原话里找到。没点名就留空数组，禁止补充用户没说的景物、人物或颜色。
+怎么对话：
+- 先看当前记忆和最近对话，再看本轮这句话。它、这张、再暗一点、换成、还是那个，都指当前这张图。
+- reply 是说给用户听的一两句中文，像聊天，说明你理解的目的。不要写提示词，不要说自己是模型，不要复述规则。
+- 能画就 action=generate，不要为了确认再问一遍。
+- 只有看不出要画什么、用户只是在问、或几条要求互相矛盾时，才 action=chat，并用 reply 问一个最关键的问题。这时 prompt 留空。
+
+怎么判断：
+- 用户要一张新图，或换了一个新主体：task=new，canvas=none，use_previous_image=false。对话里已经有图，也不能自行改上一张。
+- 用户在改刚才那张、延续那张、或只说了调整：task=edit，canvas=previous，use_previous_image=true。
+- 上图、上一张、原图，都指已经生成的图。
+- 上传图里的人去替换或放进上一张：task=swap_person 或 insert，canvas=previous，use_previous_image=true。上传图不是画布。
+- 上传的海报、商品图要改字或改局部：task=text 或 edit，canvas=upload。
+- 太假、不真实、要写真、要真实：task=realism，canvas=none，medium=photo。basis 是历史里那句作图要求的原样摘录，不要摘「太假了」。
+- 写真、实拍、照片、真实：medium=photo。动漫、插画、水墨、海报：medium=keep。
+- 只改尺寸或比例：task=size，canvas=previous，use_previous_image=true。
+
+prompt 和 memory：
+- prompt 是交给生图工具的要求。把本轮要求和记忆里已经确定的内容合并。改图时写清改什么、留什么。
+- 可以整理语序，不能另起一套故事，不能加用户没说过的人物、品牌、文字或新情节。
+- memory 用一句不超过 80 字的话记下当前画面。只写对话里出现过的内容。新主体时改写成新画面，改图时在原记忆上更新。
+- keep、change 只摘用户明确说过的短词，没点名就留空。basis 只能是用户说过的连续原文。
 """
 
 
@@ -478,6 +488,9 @@ def parse_intent(text: str) -> dict:
         "basis": str(plan.get("basis") or "").strip()[:500],
         "keep": _short_list(plan.get("keep")),
         "change": _short_list(plan.get("change")),
+        "prompt": str(plan.get("prompt") or "").strip()[:1200],
+        "memory": str(plan.get("memory") or "").strip()[:80],
+        "use_previous_image": _as_bool(plan.get("use_previous_image")),
     }
 
 
