@@ -22,6 +22,7 @@
   </div>
 
   <div id="app" class="app hidden">
+    <button id="railShade" type="button" class="rail-shade hidden" aria-label="关闭会话"></button>
     <aside id="rail" class="rail">
       <div class="brand">
         <span class="mark"></span>
@@ -32,10 +33,13 @@
     </aside>
     <main>
       <header class="top">
-        <button id="openRail" type="button" class="ghost">会话</button>
-        <div>
-          <div id="chatTitle">新对话</div>
-          <div id="chainLine" class="muted"></div>
+        <div class="top-left">
+          <button id="newChatTop" type="button" class="ghost">新的一张</button>
+          <button id="openRail" type="button" class="ghost">会话</button>
+          <div>
+            <div id="chatTitle">新对话</div>
+            <div id="chainLine" class="muted"></div>
+          </div>
         </div>
         <div class="top-actions">
           <a class="ghost link" href="/mind.html">导图</a>

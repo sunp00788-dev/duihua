@@ -8,6 +8,8 @@ const state = {
   imageModel: "auto",
   uploads: [],
   polling: false,
+  stickToLatest: true,
+  pinning: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -121,8 +123,9 @@ function renderSessions() {
     button.className = "session" + (session.id === state.currentId ? " active" : "");
     button.textContent = session.title || "新对话";
     button.onclick = () => {
+      state.stickToLatest = true;
       openSession(session.id);
-      $("rail").classList.remove("open");
+      closeRail();
     };
     $("sessions").appendChild(button);
   });
@@ -160,18 +163,39 @@ function renderThread() {
   const thread = $("thread");
   rendered.clear();
   thread.replaceChildren();
+  state.stickToLatest = true;
   if (!state.messages.length) {
     thread.appendChild(emptyState());
     return;
   }
   applyMessages(state.messages);
-  thread.scrollTop = thread.scrollHeight;
+  pinLatest();
 }
+
+function pinLatest() {
+  if (!state.stickToLatest) return;
+  const thread = $("thread");
+  const target = thread.querySelector(".bubble:last-child img") || thread.querySelector(".bubble:last-child");
+  if (!target) return;
+  const delta = target.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+  if (Math.abs(delta - 12) < 2) return;
+  state.pinning = true;
+  thread.scrollTop += delta - 12;
+  requestAnimationFrame(() => { state.pinning = false; });
+}
+
+$("thread").addEventListener("scroll", () => {
+  if (state.pinning) return;
+  const thread = $("thread");
+  const target = thread.querySelector(".bubble:last-child img") || thread.querySelector(".bubble:last-child");
+  if (!target) return;
+  const delta = target.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+  if (delta > 160) state.stickToLatest = false;
+}, { passive: true });
 
 // 只替换真正变了的那几条，避免轮询时整列重建把滚动位置和正在看的大图弄丢
 function applyMessages(messages) {
   const thread = $("thread");
-  const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
   const seen = new Set();
   messages.forEach((message) => {
     seen.add(message.id);
@@ -194,7 +218,7 @@ function applyMessages(messages) {
   }
   const empty = thread.querySelector(".empty");
   if (empty) empty.remove();
-  if (atBottom) thread.scrollTop = thread.scrollHeight;
+  pinLatest();
 }
 
 function renderMessage(message) {
@@ -217,6 +241,7 @@ function renderMessage(message) {
         img.alt = "生成图";
         img.title = "点击放大";
         img.onclick = () => openViewer(img.src);
+        img.addEventListener("load", () => pinLatest());
         const edit = document.createElement("button");
         edit.type = "button";
         edit.className = "annotate";
@@ -345,20 +370,35 @@ async function retryImage(messageId) {
   }
 }
 
-$("newChat").onclick = () => {
+function startNewChat() {
   state.currentId = null;
   state.messages = [];
+  state.stickToLatest = true;
   $("chatTitle").textContent = "新对话";
+  closeRail();
   renderSessions();
   renderThread();
-};
+  $("input").focus({ preventScroll: true });
+}
+
+function closeRail() {
+  $("rail").classList.remove("open");
+  $("railShade").classList.add("hidden");
+}
+
+$("newChat").onclick = startNewChat;
+$("newChatTop").onclick = startNewChat;
+$("railShade").onclick = closeRail;
 
 $("logout").onclick = async () => {
   await api("/api/logout", { method: "POST", body: "{}" });
   location.reload();
 };
 
-$("openRail").onclick = () => $("rail").classList.toggle("open");
+$("openRail").onclick = () => {
+  const open = $("rail").classList.toggle("open");
+  $("railShade").classList.toggle("hidden", !open);
+};
 $("attachBtn").onclick = () => $("file").click();
 $("file").onchange = async () => {
   for (const file of $("file").files) await uploadFile(file);
