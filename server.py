@@ -19,6 +19,7 @@ from pathlib import Path
 
 import image
 import llm
+import memory
 import mindmap
 import store
 import router
@@ -141,7 +142,7 @@ def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict,
         return None
     if intent["action"] == "chat":
         return {
-            "plan": {"action": "chat", "reply": intent.get("reply") or "好。", "prompt": "", "use_previous_image": False},
+            "plan": {"action": "chat", "reply": intent.get("reply") or "好。", "prompt": "", "use_previous_image": False, "keep": intent.get("keep") or [], "change": intent.get("change") or []},
             "tried": tried,
             "editing": False,
             "fresh": True,
@@ -157,6 +158,8 @@ def resolve_intent(user: dict, chat_id: str, text: str, history: list, ui: dict,
     ref_count = len(uploads) + len(urls)
 
     def pack(plan: dict, editing: bool = False, fresh: bool = False, size_only: bool = False, source: str = "", ui_size: str = "", resolution: str = "") -> dict:
+        plan["keep"] = intent.get("keep") or []
+        plan["change"] = intent.get("change") or []
         return {
             "plan": plan,
             "tried": tried,
@@ -296,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/sessions" and method == "POST":
             body = self._read_json()
             title = str(body.get("title") or "新对话")
-            self._json(200, {"session": store.create_chat(user["id"], title)})
+            self._json(200, {"session": present_chat(store.create_chat(user["id"], title))})
             return
         match = re.fullmatch(r"/api/sessions/([0-9a-f]+)", path)
         if match and method == "GET":
@@ -468,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
         if not chat:
             self._json(404, {"error": "没有这组对话"})
             return
-        self._json(200, {"session": chat, "messages": store.list_messages(user["id"], chat_id)})
+        self._json(200, {"session": present_chat(chat), "messages": store.list_messages(user["id"], chat_id)})
 
     def _chat(self, user: dict) -> None:
         if not API_KEY:
@@ -631,7 +634,7 @@ class Handler(BaseHTTPRequestHandler):
                 "assistant",
                 {"text": plan.get("reply") or "好。", "llm": {"tried": tried}},
             )
-            self._json(200, {"session": store.get_chat(user["id"], chat_id), "message": message, "chain": llm.chain_status()})
+            self._json(200, {"session": present_chat(store.get_chat(user["id"], chat_id)), "message": message, "chain": llm.chain_status()})
             return
         crop_box = None
         crop_px = None
@@ -701,6 +704,14 @@ class Handler(BaseHTTPRequestHandler):
             if extra:
                 prompt = (prompt.rstrip() + "\n" + extra).strip()
                 plan["reply"] = ((plan.get("reply") or "") + " 原话之外补了几句画面细节。").strip()
+        remembered = memory.load(store.read_memory(chat_id))
+        sources = [text] + [item.get("text") or "" for item in history]
+        keep, change = memory.pick(text, plan.get("keep"), plan.get("change"), sources, editing=not fresh)
+        if not fresh and not re.search(r"(换成|改成|不要|去掉|删除)", text):
+            keep = memory.merge(keep, remembered.get("keep") or [], change)
+        prompt = memory.attach(prompt, keep, change)
+        plan["reply"] = memory.with_reply(plan.get("reply") or "", keep, change)
+        plan["_memory_keep"] = keep
         model = ui["image_model"] if ui["image_model"] in image.ALLOWED_MODELS else image.IMAGE_MODELS[0]["id"]
         if ui.get("model_auto"):
             plan["reply"] = ((plan.get("reply") or "") + f" 这类任务自动用了 {image.model_label(model)}。").strip()
@@ -727,6 +738,13 @@ class Handler(BaseHTTPRequestHandler):
             count = 1
         if count not in (1, 2, 4):
             count = 1
+        store.write_memory(
+            chat_id,
+            json.dumps(
+                memory.updated(remembered, fresh=fresh, text=text, keep=plan.get("_memory_keep") or [], size=size or ""),
+                ensure_ascii=False,
+            ),
+        )
         try:
             image_urls = forced_refs if forced_refs else collect_refs(
                 user["id"],
@@ -766,7 +784,7 @@ class Handler(BaseHTTPRequestHandler):
                     "image": {"status": "FAILURE", "fail_reason": str(exc), "model": model},
                 },
             )
-            self._json(200, {"session": store.get_chat(user["id"], chat_id), "message": message, "chain": llm.chain_status()})
+            self._json(200, {"session": present_chat(store.get_chat(user["id"], chat_id)), "message": message, "chain": llm.chain_status()})
             return
         reply = (plan.get("reply") or "正在画。").strip()
         if size_note:
@@ -797,7 +815,7 @@ class Handler(BaseHTTPRequestHandler):
         message = store.add_message(chat_id, user["id"], "assistant", assistant)
         store.create_job(message["id"], chat_id, user["id"], task_id)
         log(f"image submit user={user['username']} task={task_id} model={model}")
-        self._json(200, {"session": store.get_chat(user["id"], chat_id), "message": message, "chain": llm.chain_status()})
+        self._json(200, {"session": present_chat(store.get_chat(user["id"], chat_id)), "message": message, "chain": llm.chain_status()})
 
     def _retry(self, user: dict) -> None:
         body = self._read_json()
@@ -1280,6 +1298,19 @@ def _size_rejected(exc: image.ImageError) -> bool:
     return any(word in text for word in ("size", "ratio", "aspect", "比例", "尺寸"))
 
 
+def present_chat(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    card = memory.load(row.get("memory"))
+    return {
+        "id": row["id"],
+        "title": row.get("title") or "",
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "memory_line": memory.line(card),
+    }
+
+
 def last_generated(user_id: str, chat_id: str) -> dict | None:
     for message in reversed(store.list_messages(user_id, chat_id)):
         body = message.get("body") or {}
@@ -1418,6 +1449,12 @@ def poll_once() -> None:
             info["local_names"] = names
             info["fail_reason"] = "" if names else "图已生成，但服务器没能保存下来"
             store.update_message(message["id"], message["body"])
+            if names:
+                card = memory.load(store.read_memory(job["chat_id"]))
+                store.write_memory(
+                    job["chat_id"],
+                    json.dumps(memory.note_image(card, names[-1], info.get("size") or ""), ensure_ascii=False),
+                )
             store.update_job(job["id"], "SUCCESS")
             if names:
                 store.add_usage(job["user_id"], max(1, len(names)))

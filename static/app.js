@@ -136,6 +136,7 @@ async function openSession(id) {
   const data = await api("/api/sessions/" + id);
   state.messages = data.messages;
   $("chatTitle").textContent = data.session.title || "新对话";
+  showMemory(data.session);
   renderSessions();
   renderThread();
   if (state.messages.some((item) => (item.body.image || {}).status === "PENDING")) startPoll();
@@ -347,6 +348,7 @@ function startPoll() {
     try {
       const data = await api("/api/sessions/" + state.currentId);
       state.messages = data.messages;
+      showMemory(data.session);
       applyMessages(data.messages);
       const pending = state.messages.some((item) => (item.body.image || {}).status === "PENDING");
       if (!pending) {
@@ -370,11 +372,16 @@ async function retryImage(messageId) {
   }
 }
 
+function showMemory(session) {
+  $("memoryLine").textContent = (session && session.memory_line) || "";
+}
+
 function startNewChat() {
   state.currentId = null;
   state.messages = [];
   state.stickToLatest = true;
   $("chatTitle").textContent = "新对话";
+  showMemory(null);
   closeRail();
   renderSessions();
   renderThread();

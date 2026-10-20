@@ -127,6 +127,7 @@ def init_db() -> None:
                 "ALTER TABLE mindmaps ADD COLUMN spacing INTEGER NOT NULL DEFAULT 34",
                 "ALTER TABLE mindmaps ADD COLUMN layout TEXT NOT NULL DEFAULT 'right'",
                 "ALTER TABLE mindmaps ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE chats ADD COLUMN memory TEXT NOT NULL DEFAULT '{}'",
             ):
                 try:
                     conn.execute(statement)
@@ -315,6 +316,28 @@ def get_chat(user_id: str, chat_id: str) -> dict | None:
         conn = connect()
         try:
             return _one(conn, "SELECT * FROM chats WHERE id = ? AND user_id = ?", (chat_id, user_id))
+        finally:
+            conn.close()
+
+
+def read_memory(chat_id: str) -> str:
+    with LOCK:
+        conn = connect()
+        try:
+            row = _one(conn, "SELECT memory FROM chats WHERE id = ?", (chat_id,))
+        finally:
+            conn.close()
+    if not row:
+        return "{}"
+    return row.get("memory") or "{}"
+
+
+def write_memory(chat_id: str, raw: str) -> None:
+    with LOCK:
+        conn = connect()
+        try:
+            conn.execute("UPDATE chats SET memory = ? WHERE id = ?", (raw, chat_id))
+            conn.commit()
         finally:
             conn.close()
 

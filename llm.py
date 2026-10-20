@@ -435,7 +435,7 @@ def _as_bool(value) -> bool:
 
 INTENT = """你只判断用户要做什么。只输出一个 JSON，不要写画面，不要改写景物。
 
-{"action":"generate"|"chat","reply":"一句话","task":"new"|"edit"|"text"|"swap_person"|"insert"|"realism"|"size","canvas":"none"|"previous"|"upload","medium":"photo"|"keep","basis":""}
+{"action":"generate"|"chat","reply":"一句话","task":"new"|"edit"|"text"|"swap_person"|"insert"|"realism"|"size","canvas":"none"|"previous"|"upload","medium":"photo"|"keep","basis":"","keep":[],"change":[]}
 
 判断：
 - 用户要一张新图，task=new，canvas=none。对话里已经有图也不要改上一张，除非用户明确在改那张。
@@ -447,6 +447,7 @@ INTENT = """你只判断用户要做什么。只输出一个 JSON，不要写画
 - 只改尺寸或比例：task=size，canvas=previous。
 - 闲聊或先别画：action=chat，task=new，basis 空。
 - basis 只能是用户说过的连续原文，禁止编造。reply 不要复述画面细节。
+- keep 是用户明确说要保留的短词，change 是明确要改的短词。每项不超过 12 个字，最多 3 项，必须能在用户原话里找到。没点名就留空数组，禁止补充用户没说的景物、人物或颜色。
 """
 
 
@@ -475,7 +476,24 @@ def parse_intent(text: str) -> dict:
         "canvas": canvas,
         "medium": medium,
         "basis": str(plan.get("basis") or "").strip()[:500],
+        "keep": _short_list(plan.get("keep")),
+        "change": _short_list(plan.get("change")),
     }
+
+
+def _short_list(value) -> list[str]:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        text = str(item or "").strip()[:12]
+        if text and text not in out:
+            out.append(text)
+        if len(out) == 3:
+            break
+    return out
 
 
 def _json_object(text: str) -> dict:

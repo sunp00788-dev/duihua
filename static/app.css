@@ -84,6 +84,8 @@ main { min-height: 0; min-width: 0; overflow: hidden; display: grid; grid-templa
 .progress { height: 6px; background: #2c261f; border-radius: 99px; overflow: hidden; margin-top: 8px; }
 .progress span { display: block; height: 100%; background: var(--amber); width: 8%; }
 .composer { flex-shrink: 0; border-top: 1px solid var(--line); padding: 10px 12px 14px; background: #171410; }
+.memory-line { color: var(--muted); font-size: 12px; }
+.memory-line:empty { display: none; }
 .controls, .pills, .attach-row, .input-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .controls { flex-wrap: nowrap; overflow-x: auto; }
 .controls select, .controls .check, .pills { flex: 0 0 auto; }

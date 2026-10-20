@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
-COPY server.py llm.py image.py store.py mindmap.py prompts.py router.py ./
+COPY server.py llm.py image.py store.py mindmap.py prompts.py router.py memory.py ./
 COPY static ./static
 
 ENV HOST=0.0.0.0
