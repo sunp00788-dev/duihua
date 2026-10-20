@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>对画</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2316100d'/%3E%3Crect x='7' y='7' width='18' height='18' rx='2' fill='none' stroke='%23e39a4a' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="loginForm" class="login-card">
+      <div class="mark"></div>
+      <h1>对画</h1>
+      <p>公司内部生图。请使用管理员发给你的账号。</p>
+      <label>账号<input name="username" autocomplete="username" required></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">进入</button>
+      <div id="loginError" class="error"></div>
+    </form>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside id="rail" class="rail">
+      <div class="brand">
+        <span class="mark"></span>
+        <div><strong>对画</strong><em>对话生图</em></div>
+      </div>
+      <button id="newChat" type="button">新的一张</button>
+      <div id="sessions" class="sessions"></div>
+    </aside>
+    <main>
+      <header class="top">
+        <button id="openRail" type="button" class="ghost">会话</button>
+        <div>
+          <div id="chatTitle">新对话</div>
+          <div id="chainLine" class="muted"></div>
+        </div>
+        <div class="top-actions">
+          <a class="ghost link" href="/mind.html">导图</a>
+          <button id="openAdmin" type="button" class="ghost hidden">账号</button>
+          <button id="logout" type="button" class="ghost">退出</button>
+        </div>
+      </header>
+      <div id="thread" class="thread"></div>
+      <form id="composer" class="composer">
+        <div class="controls">
+          <div id="modelPills" class="pills"></div>
+          <select id="size" aria-label="比例">
+            <option value="auto">比例自动</option>
+            <option>8:1</option><option>4:1</option><option>3:1</option><option>21:9</option><option>2:1</option>
+            <option>16:9</option><option>3:2</option><option>4:3</option><option>5:4</option><option>1:1</option>
+            <option>4:5</option><option>3:4</option><option>2:3</option><option>9:16</option><option>1:2</option>
+            <option>9:21</option><option>1:3</option><option>1:4</option><option>1:8</option>
+          </select>
+          <select id="resolution" aria-label="分辨率">
+            <option value="">分辨率不指定</option>
+            <option>1024</option><option>2k</option><option>4k</option>
+          </select>
+          <select id="quality" aria-label="画质">
+            <option value="high" selected>清晰</option>
+            <option value="">标准</option>
+            <option value="medium">中</option>
+            <option value="low">低</option>
+            <option value="xhigh">更高</option>
+            <option value="max">最高</option>
+          </select>
+          <select id="count" aria-label="张数">
+            <option value="1">1 张</option><option value="2">2 张</option><option value="4">4 张</option>
+          </select>
+          <label class="check"><input id="useLlm" type="checkbox" checked>编排</label>
+          <label class="check"><input id="usePrevious" type="checkbox">参考上一张</label>
+        </div>
+        <div id="attachRow" class="attach-row"></div>
+        <div id="sendState" class="muted"></div>
+        <div class="input-row">
+          <button id="attachBtn" type="button" class="ghost">参考图</button>
+          <button id="pickEdit" type="button" class="ghost">标注已有图</button>
+          <textarea id="input" rows="2" placeholder="说要画什么。接着说「暗一点」「换成猫」即可改上一张。Enter 发送"></textarea>
+          <button type="submit" id="send">生成</button>
+        </div>
+        <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+      </form>
+    </main>
+  </div>
+
+  <div id="admin" class="drawer hidden">
+    <div class="drawer-card">
+      <header><strong>员工账号</strong><button id="closeAdmin" type="button" class="ghost">关闭</button></header>
+      <form id="userForm" class="stack">
+        <input name="username" placeholder="用户名" required>
+        <input name="password" placeholder="初始密码，至少 6 位" required>
+        <input name="daily_limit" placeholder="每日张数，可空" inputmode="numeric">
+        <button type="submit">添加员工</button>
+      </form>
+      <div id="userList"></div>
+      <h3>编排降级</h3>
+      <div id="chainEditor"></div>
+      <button id="clearCooldown" type="button" class="ghost">清空冷却</button>
+      <form id="passForm" class="stack">
+        <h3>修改我的密码</h3>
+        <input name="old" type="password" placeholder="原密码" required>
+        <input name="new" type="password" placeholder="新密码" required>
+        <button type="submit">保存</button>
+      </form>
+      <div id="adminError" class="error"></div>
+    </div>
+  </div>
+  <div id="editor" class="editor hidden">
+    <div class="editor-card">
+      <header>
+        <div>
+          <strong>标注修改</strong>
+          <p>先选一张已生成的图，涂抹或圈出要改的位置，再写怎么改。红色标记只给模型看，不会留在成图里。</p>
+        </div>
+        <button id="editorClose" type="button" class="ghost">关闭</button>
+      </header>
+      <div id="editorPicks" class="editor-picks"></div>
+      <div class="editor-tools">
+        <button type="button" data-tool="brush" class="on">涂抹</button>
+        <button type="button" data-tool="circle">圈选</button>
+        <button type="button" data-tool="arrow">箭头</button>
+        <button type="button" data-tool="text">文字</button>
+        <label>粗细 <input id="editorSize" type="range" min="4" max="36" value="14"></label>
+        <input id="editorLabel" placeholder="文字标注，点到图上放下">
+        <button id="editorUndo" type="button" class="ghost">撤销</button>
+        <button id="editorClear" type="button" class="ghost">清空标记</button>
+      </div>
+      <div class="editor-stage"><canvas id="editCanvas"></canvas></div>
+      <form id="editorForm" class="editor-form">
+        <textarea id="editorText" rows="2" placeholder="例如：把圈出的帽子换成红色贝雷帽，其余不要动"></textarea>
+        <button type="submit">按标注生成</button>
+      </form>
+    </div>
+  </div>
+  <div id="viewer" class="viewer hidden">
+    <div class="viewer-bar">
+      <span>滚轮缩放，拖动查看。点击空白或按 Esc 关闭。</span>
+      <button id="zoomOut" type="button" class="ghost">缩小</button>
+      <button id="zoomReset" type="button" class="ghost">适合屏幕</button>
+      <button id="zoomIn" type="button" class="ghost">放大</button>
+      <button id="viewerClose" type="button" class="ghost">关闭</button>
+    </div>
+    <div id="viewerStage" class="viewer-stage"><img id="viewerImg" alt="放大查看"></div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

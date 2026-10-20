@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>导图</title>
+  <link rel="stylesheet" href="/static/mind.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="ghost" href="/">生图</a>
+    <strong id="title">导图</strong>
+    <label class="sp" for="layout">版式<select id="layout" aria-label="版式">
+      <option value="right">向右</option>
+      <option value="both">双向</option>
+      <option value="down">组织架构</option>
+    </select></label>
+    <label class="sp" for="theme">主题<select id="theme" aria-label="主题">
+      <option value="classic">经典</option>
+      <option value="dark">深色</option>
+      <option value="warm">暖橘</option>
+      <option value="ocean">海蓝</option>
+      <option value="ink">纸白</option>
+    </select></label>
+    <label class="sp">连线<input id="spacing" type="range" min="20" max="160" step="4" value="34"><span id="spacingOut">34</span></label>
+    <button id="zoomOut" type="button" class="ghost">缩小</button>
+    <button id="zoomIn" type="button" class="ghost">放大</button>
+    <button id="fit" type="button" class="ghost">适应</button>
+    <button id="addChild" type="button" class="ghost">加子节点</button>
+    <button id="addSibling" type="button" class="ghost">加同级</button>
+    <button id="removeNode" type="button" class="ghost">删除节点</button>
+    <button id="save" type="button" class="ghost">保存</button>
+    <span id="saveState" class="savestate"></span>
+    <button id="outlineBtn" type="button" class="ghost">大纲</button>
+    <button id="svg" type="button">导出 SVG</button>
+    <button id="png" type="button">导出 PNG</button>
+    <button id="print" type="button" class="ghost">打印 / PDF</button>
+  </header>
+  <div class="body">
+    <aside>
+      <form id="ask">
+        <textarea id="text" rows="4" placeholder="用一句话说明要整理的内容。也可以只上传文档。"></textarea>
+        <label class="file">上传文档<input id="file" type="file" accept=".txt,.md,.markdown,.docx,.pdf"></label>
+        <p id="fileName" class="muted"></p>
+        <button type="submit">生成导图</button>
+      </form>
+      <div id="style" class="style-panel">
+        <div class="row-title">选中的节点</div>
+        <p class="muted tiny">边框和形状会作用到这个节点和它的所有子节点。</p>
+        <button id="editText" type="button" class="ghost wide">改文字</button>
+        <label class="pick">标签<input id="nodeTag" type="text" maxlength="12" placeholder="分类"></label>
+        <label class="pick">链接<input id="nodeLink" type="text" maxlength="300" placeholder="https://"></label>
+        <label class="field">备注<textarea id="nodeNote" rows="2" maxlength="200" placeholder="补充说明"></textarea></label>
+        <label class="pick">填充<input id="fill" type="color" value="#ffffff"></label>
+        <label class="pick">边框<input id="stroke" type="color" value="#2f6f62"></label>
+        <label class="pick">字色<input id="textColor" type="color" value="#1c1916"></label>
+        <label class="pick">字号<select id="fontSize">
+          <option value="12">12</option>
+          <option value="14">14</option>
+          <option value="15" selected>15</option>
+          <option value="17">17</option>
+          <option value="20">20</option>
+          <option value="24">24</option>
+        </select></label>
+        <label class="pick">形状<select id="shape">
+          <option value="round">圆角</option>
+          <option value="rect">直角</option>
+          <option value="ellipse">椭圆</option>
+        </select></label>
+        <label class="check"><input id="bold" type="checkbox"> 加粗</label>
+        <button id="resetStyle" type="button" class="ghost wide">恢复默认</button>
+      </div>
+      <p id="note" class="muted"></p>
+      <div class="searchrow">
+        <input id="search" type="search" placeholder="搜索节点">
+        <button id="searchGo" type="button" class="ghost">找</button>
+      </div>
+      <div id="list"></div>
+    </aside>
+    <div id="board"></div>
+  </div>
+  <aside id="outlineDrawer" class="drawer hidden">
+    <header>
+      <strong>大纲</strong>
+      <button id="outlineClose" type="button" class="ghost">关闭</button>
+    </header>
+    <p class="muted tiny">每两个空格缩进一级。可以直接粘贴 Markdown 标题或列表。</p>
+    <textarea id="outlineText" spellcheck="false"></textarea>
+    <div class="drawer-actions">
+      <button id="outlineApply" type="button">应用到导图</button>
+      <button id="outlineRefresh" type="button" class="ghost">从导图刷新</button>
+      <button id="outlineMd" type="button" class="ghost">导出 Markdown</button>
+      <button id="outlineOpml" type="button" class="ghost">导出 OPML</button>
+    </div>
+    <label class="field">重新整理（用保存的原文再生成一次）
+      <input id="regenHint" type="text" maxlength="300" placeholder="可选：例如按章节、只要三层">
+    </label>
+    <div class="drawer-actions">
+      <button id="regen" type="button" class="ghost">重新整理</button>
+    </div>
+    <p id="outlineNote" class="muted"></p>
+  </aside>
+  <script src="/static/mind_render.js"></script>
+  <script src="/static/mind.js"></script>
+</body>
+</html>
