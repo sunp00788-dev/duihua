@@ -17,6 +17,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import creative
 import image
 import llm
 import memory
@@ -345,6 +346,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/upload" and method == "POST":
             self._upload(user)
+            return
+        if path == "/api/creative/plan" and method == "POST":
+            self._creative_plan(user)
+            return
+        if path == "/api/creative/generate" and method == "POST":
+            self._creative_generate(user)
             return
         if path == "/api/mindmaps" and method == "GET":
             self._json(200, {"maps": store.list_mindmaps(user["id"])})
@@ -903,6 +910,135 @@ class Handler(BaseHTTPRequestHandler):
         store.create_job(message["id"], message["chat_id"], user["id"], task_id)
         self._json(200, {"message": message})
 
+    def _creative_plan(self, user: dict) -> None:
+        body = self._read_json()
+        text = str(body.get("text") or "").strip()
+        category = creative.normalize_category(body.get("category"))
+        use = creative.normalize_use(body.get("use"))
+        uploads = _upload_ids(body.get("upload_ids"))
+        if uploads is None or not _uploads_owned(user["id"], uploads):
+            self._json(400, {"error": "这张商品图不存在"})
+            return
+        if not creative.ready(text, category, bool(uploads)):
+            self._json(400, {"error": "先上传商品图，或选一个类目"})
+            return
+        base = creative.presets(category)
+        directions = base
+        tried = []
+        if text and API_KEY:
+            rewritten, tried = llm.plan_creative(API_KEY, BASE_URL, text, base)
+            if rewritten:
+                directions = creative.merge_directions(base, rewritten, text)
+        self._json(
+            200,
+            {
+                "directions": directions,
+                "category": category,
+                "use": use,
+                "size": creative.size_for(use),
+                "tried": tried,
+            },
+        )
+
+    def _creative_generate(self, user: dict) -> None:
+        if not API_KEY:
+            self._json(500, {"error": "服务器还没配置密钥"})
+            return
+        body = self._read_json()
+        text = str(body.get("text") or "").strip()
+        category = creative.normalize_category(body.get("category"))
+        use = creative.normalize_use(body.get("use"))
+        uploads = _upload_ids(body.get("upload_ids"))
+        if uploads is None or not _uploads_owned(user["id"], uploads):
+            self._json(400, {"error": "这张商品图不存在"})
+            return
+        if not creative.ready(text, category, bool(uploads)):
+            self._json(400, {"error": "先上传商品图，或选一个类目"})
+            return
+        direction = creative.clean_direction(body.get("direction"), text, category)
+        if not direction:
+            self._json(400, {"error": "先选一个方向"})
+            return
+        if store.pending_count(user["id"]) >= 2:
+            self._json(429, {"error": "还有两张在画，等它们完成再发"})
+            return
+        limit = user.get("daily_limit")
+        count = body.get("n") if body.get("n") in (1, 4) else 1
+        if limit and store.usage_today(user["id"]) + count > int(limit):
+            self._json(429, {"error": "今天的张数已经用完"})
+            return
+        has_image = bool(uploads)
+        prompt = creative.compile_prompt(text, direction, has_image, category)
+        chosen = "gpt-image-2.5-ext" if has_image or image.TEXT_TASK.search(text) else ""
+        model = image.pick_model(text, chosen)
+        size = creative.size_for(use)
+        if size not in image.model_sizes(model):
+            size = "1:1"
+        title = direction["title"] or text or "创意"
+        chat = store.create_chat(user["id"], title)
+        chat_id = chat["id"]
+        store.add_message(
+            chat_id,
+            user["id"],
+            "user",
+            {
+                "text": text or direction["title"],
+                "attachments": uploads[:1],
+                "creative": {"direction": direction, "use": use, "category": category},
+            },
+        )
+        reply = f"按「{direction['title']}」来画。场景是{direction['scene']}。"
+        _save_conversation_memory(
+            chat_id,
+            {"memory": f"{direction['title']}，{direction['scene']}", "keep": direction.get("props") or [], "conversation": True},
+            fresh=True,
+            text=text or direction["title"],
+            size=size,
+        )
+        try:
+            image_urls = collect_refs(user["id"], chat_id, uploads[:1], [], False, "")
+            payload = image.build_payload(model, _prompt_with_size(prompt, size), size, "", "high", count, image_urls)
+            task_id = image.submit(API_KEY, BASE_URL, payload)
+        except image.ImageError as exc:
+            message = store.add_message(
+                chat_id,
+                user["id"],
+                "assistant",
+                {
+                    "text": "没能提交这张电商图。",
+                    "prompt": prompt,
+                    "image": {"status": "FAILURE", "fail_reason": str(exc), "model": model},
+                },
+            )
+            self._json(200, {"session": present_chat(store.get_chat(user["id"], chat_id)), "message": message})
+            return
+        message = store.add_message(
+            chat_id,
+            user["id"],
+            "assistant",
+            {
+                "text": reply,
+                "prompt": prompt,
+                "image": {
+                    "model": model,
+                    "task_id": task_id,
+                    "status": "PENDING",
+                    "progress": "0%",
+                    "remote_urls": [],
+                    "local_names": [],
+                    "fail_reason": "",
+                    "size": size,
+                    "n": count,
+                    "resolution": "",
+                    "quality": "high",
+                    "submitted_at": store.now(),
+                },
+            },
+        )
+        store.create_job(message["id"], chat_id, user["id"], task_id)
+        log(f"creative submit user={user['username']} task={task_id} model={model}")
+        self._json(200, {"session": present_chat(store.get_chat(user["id"], chat_id)), "message": message})
+
     def _upload(self, user: dict) -> None:
         body = self._read_json(limit=12_000_000)
         data_url = str(body.get("data_url") or "")
@@ -1319,6 +1455,28 @@ def _save_conversation_memory(chat_id: str, plan: dict, fresh: bool, text: str, 
     elif plan.get("conversation") and not card.get("subject"):
         card["subject"] = memory.subject_from(text)
     store.write_memory(chat_id, json.dumps(card, ensure_ascii=False))
+
+
+def _upload_ids(value) -> list[str] | None:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        return None
+    found = []
+    for item in value[:1]:
+        name = str(item or "")
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+            return None
+        found.append(name)
+    return found
+
+
+def _uploads_owned(user_id: str, names: list[str]) -> bool:
+    folder = store.DATA / "uploads" / user_id
+    for name in names:
+        if not (folder / name).is_file():
+            return False
+    return True
 
 
 def present_chat(row: dict | None) -> dict | None:

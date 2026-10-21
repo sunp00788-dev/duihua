@@ -111,6 +111,11 @@ async function loadSessions() {
   const data = await api("/api/sessions");
   state.sessions = data.sessions;
   renderSessions();
+  const wanted = new URLSearchParams(location.search).get("session");
+  if (!state.currentId && wanted && state.sessions.some((item) => item.id === wanted)) {
+    openSession(wanted);
+    return;
+  }
   if (!state.currentId && state.sessions[0]) openSession(state.sessions[0].id);
   if (!state.sessions.length) renderThread();
 }

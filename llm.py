@@ -539,6 +539,53 @@ ENHANCE = """你在帮生图模型补画面细节。只输出 JSON：{"detail":"
 """
 
 
+CREATIVE = """你在改写三个电商拍摄方向。只输出 JSON：{"directions":[{"title":"","scene":"","light":"","angle":"","props":[]}]}
+
+规则：
+1. 必须返回 3 个方向，顺序与给出的方向一致。
+2. 按用户那一句思路改写 title、scene、light、angle。用户没写思路就原样返回。
+3. props 只能保留原方向里已有的道具，或用户原话里点名的短词。每项不超过 12 字，最多 2 个。不许新加人物、品牌、价格、广告语。
+4. 每个字段都短：title 不超过 12 字，scene 不超过 28 字。
+"""
+
+
+def plan_creative(api_key: str, base_url: str, user_text: str, directions: list[dict]) -> tuple[list[dict] | None, list[dict]]:
+    payload = "用户思路：" + (user_text or "（没有）")[:500] + "\n现有方向：" + json.dumps(directions, ensure_ascii=False)
+    plan, tried = orchestrate(
+        api_key,
+        base_url,
+        payload,
+        system=CREATIVE,
+        parser=parse_creative,
+        max_tokens=1200,
+        seconds=40,
+    )
+    if not plan:
+        return None, tried
+    return plan["directions"], tried
+
+
+def parse_creative(text: str) -> dict:
+    plan = _json_object(text)
+    items = plan.get("directions")
+    if not isinstance(items, list) or len(items) < 3:
+        raise LlmError("bad_json", "方向不足", 120)
+    directions = []
+    for item in items[:3]:
+        if not isinstance(item, dict):
+            raise LlmError("bad_json", "方向不是对象", 120)
+        directions.append(
+            {
+                "title": str(item.get("title") or "").strip()[:24],
+                "scene": str(item.get("scene") or "").strip()[:40],
+                "light": str(item.get("light") or "").strip()[:24],
+                "angle": str(item.get("angle") or "").strip()[:24],
+                "props": _short_list(item.get("props"))[:2],
+            }
+        )
+    return {"directions": directions}
+
+
 def enhance(api_key: str, base_url: str, user_text: str) -> str:
     """Ask for a short extra clause that fills gaps, never a rewrite."""
     plan, _tried = orchestrate(
