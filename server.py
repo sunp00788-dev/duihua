@@ -914,7 +914,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         text = str(body.get("text") or "").strip()
         category = creative.normalize_category(body.get("category"))
-        use = creative.normalize_use(body.get("use"))
+        use = creative.normalize_use(body.get("use"), category)
         uploads = _upload_ids(body.get("upload_ids"))
         if uploads is None or not _uploads_owned(user["id"], uploads):
             self._json(400, {"error": "这张商品图不存在"})
@@ -935,7 +935,7 @@ class Handler(BaseHTTPRequestHandler):
                 "directions": directions,
                 "category": category,
                 "use": use,
-                "size": creative.size_for(use),
+                "size": creative.size_for(use, category),
                 "tried": tried,
             },
         )
@@ -947,7 +947,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         text = str(body.get("text") or "").strip()
         category = creative.normalize_category(body.get("category"))
-        use = creative.normalize_use(body.get("use"))
+        use = creative.normalize_use(body.get("use"), category)
         uploads = _upload_ids(body.get("upload_ids"))
         if uploads is None or not _uploads_owned(user["id"], uploads):
             self._json(400, {"error": "这张商品图不存在"})
@@ -968,10 +968,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(429, {"error": "今天的张数已经用完"})
             return
         has_image = bool(uploads)
-        prompt = creative.compile_prompt(text, direction, has_image, category)
-        chosen = "gpt-image-2.5-ext" if has_image or image.TEXT_TASK.search(text) else ""
+        prompt = creative.compile_prompt(text, direction, has_image, category, use)
+        chosen = "gpt-image-2.5-ext" if category == "label" or has_image or image.TEXT_TASK.search(text) else ""
         model = image.pick_model(text, chosen)
-        size = creative.size_for(use)
+        size = creative.size_for(use, category)
         if size not in image.model_sizes(model):
             size = "1:1"
         title = direction["title"] or text or "创意"

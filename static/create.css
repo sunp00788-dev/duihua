@@ -53,6 +53,7 @@ textarea {
 .card h2 { margin: 0 0 8px; font-size: 18px; }
 .card p { margin: 4px 0; line-height: 1.5; }
 .draw { margin-top: 12px; }
+.note { color: var(--muted); font-size: 13px; line-height: 1.55; }
 .error, .warn { color: var(--red); min-height: 1.2em; margin-top: 10px; }
 button:disabled { opacity: .55; cursor: wait; }
 @media (max-width: 800px) {

@@ -58,6 +58,20 @@ def test_invented_prop_dropped():
     check("preset prop kept", "亚麻布" in merged[0]["props"])
 
 
+def test_label_is_flat_artwork_not_a_photo():
+    direction = creative.presets("瓶贴")[0]
+    face = creative.compile_prompt("夏天、想要高级感", direction, True, "label", "face")
+    check("flat label", "不要画瓶子" in face)
+    check("does not lock old label", "必须保持原样" not in face)
+    check("mood is not printed", "唯一允许出现的文字" not in face)
+    named = creative.compile_prompt("白茶精华", direction, False, "label", "face")
+    check("short name allowed", "白茶精华" in named and "唯一允许出现的文字" in named)
+    check("no legal copy", "不要生成成分表" in named)
+    check("wrap ratio", creative.size_for("band", "label") == "2:1")
+    preview = creative.compile_prompt("白茶精华", direction, False, "label", "preview")
+    check("preview is a bottle", "滴管精华瓶" in preview)
+
+
 def test_clean_direction_rejects_blank():
     check("blank direction", creative.clean_direction({}, "", "home") is None)
     cleaned = creative.clean_direction(
@@ -75,6 +89,7 @@ if __name__ == "__main__":
     test_prompt_locks_product_and_keeps_words()
     test_no_brand_without_product()
     test_invented_prop_dropped()
+    test_label_is_flat_artwork_not_a_photo()
     test_clean_direction_rejects_blank()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     raise SystemExit(1 if FAIL else 0)

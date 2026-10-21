@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
+
 CATEGORIES = {
     "beauty": "美妆",
     "food": "食品",
     "home": "家居",
     "fashion": "服饰",
     "digital": "数码",
+    "label": "瓶贴",
     "any": "不限",
 }
 
@@ -17,6 +20,7 @@ SUBJECTS = {
     "home": "一件家居用品",
     "fashion": "一件服饰",
     "digital": "一件数码产品",
+    "label": "美容精华瓶的瓶贴",
     "any": "一件商品",
 }
 
@@ -24,6 +28,12 @@ USES = {
     "hero": ("主图", "1:1"),
     "scene": ("场景", "4:5"),
     "poster": ("海报", "3:4"),
+}
+
+LABEL_USES = {
+    "face": ("正面贴", "3:4"),
+    "band": ("环绕纹样", "2:1"),
+    "preview": ("瓶身预览", "3:4"),
 }
 
 _PRESETS = {
@@ -57,6 +67,11 @@ _PRESETS = {
         ("桌面生活", "浅色桌面", "自然光", "四分之三", ["亚麻布"]),
         ("质感特写", "干净浅背景", "侧光", "特写", []),
     ],
+    "label": [
+        ("细叶留白", "四周是细线植物，正中留出一块空白", "米白和浅金", "正面平铺", ["细叶"]),
+        ("水波纹样", "可左右连续的浅色水波，中间不放内容", "淡青和白", "横向连续", ["水波"]),
+        ("细框金线", "细线边框，四角有小几何，中间留白", "米白和金", "正面平铺", ["金线"]),
+    ],
 }
 
 
@@ -67,19 +82,37 @@ def normalize_category(value: str) -> str:
     return raw if raw in _PRESETS else "any"
 
 
-def normalize_use(value: str) -> str:
+def normalize_use(value: str, category: str = "any") -> str:
     raw = str(value or "").strip().lower()
+    if normalize_category(category) == "label":
+        aliases = {"正面贴": "face", "环绕纹样": "band", "瓶身预览": "preview", "hero": "face", "scene": "band", "poster": "preview"}
+        raw = aliases.get(raw, raw)
+        return raw if raw in LABEL_USES else "face"
     aliases = {label: key for key, (label, _size) in USES.items()}
     raw = aliases.get(raw, raw)
     return raw if raw in USES else "hero"
 
 
-def size_for(use: str) -> str:
+def size_for(use: str, category: str = "any") -> str:
+    if normalize_category(category) == "label":
+        return LABEL_USES[normalize_use(use, category)][1]
     return USES[normalize_use(use)][1]
 
 
-def use_label(use: str) -> str:
+def use_label(use: str, category: str = "any") -> str:
+    if normalize_category(category) == "label":
+        return LABEL_USES[normalize_use(use, category)][0]
     return USES[normalize_use(use)][0]
+
+
+def label_name(text: str) -> str:
+    """只有像品名的短词才允许出现在瓶贴上。风格描述不算品名。"""
+    raw = (text or "").strip()
+    if not raw or len(raw) > 12:
+        return ""
+    if re.search(r"[，,。！？、\s]|想要|高级|干净|夏天|风格|感觉|图案|纹样", raw):
+        return ""
+    return raw
 
 
 def ready(text: str, category: str, has_image: bool) -> bool:
@@ -146,9 +179,12 @@ def clean_direction(raw, spoken: str, category: str) -> dict | None:
     }
 
 
-def compile_prompt(text: str, direction: dict, has_image: bool, category: str) -> str:
+def compile_prompt(text: str, direction: dict, has_image: bool, category: str, use: str = "hero") -> str:
     spoken = (text or "").strip()
-    subject = SUBJECTS[normalize_category(category)]
+    kind = normalize_category(category)
+    if kind == "label":
+        return _label_prompt(spoken, direction, has_image, use)
+    subject = SUBJECTS[kind]
     lines = [spoken or f"为{subject}做一张电商图。"]
     if has_image:
         lines.append("第一张图是商品本身。外形、颜色、包装文字和 logo 必须保持原样，不能重画商品，也不能改标签。只更换场景、光线和道具。")
@@ -161,6 +197,27 @@ def compile_prompt(text: str, direction: dict, has_image: bool, category: str) -
     else:
         lines.append("不要添加人物，不要在画面上写字。")
     lines.append("商品完整，阴影自然，背景干净，适合电商上架。")
+    return "\n".join(lines)
+
+
+def _label_prompt(spoken: str, direction: dict, has_image: bool, use: str) -> str:
+    kind = normalize_use(use, "label")
+    lines = [spoken or "为美容精华瓶做一张瓶贴图案。"]
+    if kind == "preview":
+        lines.append("画一支简单的滴管精华瓶，瓶身正面贴着下面的图案。这只是看贴上去的效果，不要加场景。")
+    elif kind == "band":
+        lines.append("画一条可以左右连续的平面纹样，用来环绕瓶身。不要画瓶子，不要透视，不要桌面。")
+    else:
+        lines.append("画一张竖直的平面正面贴标，正对镜头。不要画瓶子，不要透视，不要桌面和背景。")
+    lines.append(f"图案：{direction['scene']}。配色：{direction['light']}。版式：{direction['angle']}。")
+    name = label_name(spoken)
+    if name:
+        lines.append(f"画面上唯一允许出现的文字是「{name}」，字要少、要大、要清楚。不要写别的字。")
+    else:
+        lines.append("不要在画面上写任何文字。正中留出一块空白，以后再排品名。")
+    lines.append("不要生成成分表、净含量、条码、备案号、生产许可证或功效承诺。这不是可印刷的标签文件。")
+    if has_image:
+        lines.append("参考图只提供瓶型或已有图案的气质，不要照抄上面的文字，也不要原样贴回去。")
     return "\n".join(lines)
 
 

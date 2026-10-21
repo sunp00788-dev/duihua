@@ -15,11 +15,17 @@ const categories = [
   ["home", "家居"],
   ["fashion", "服饰"],
   ["digital", "数码"],
+  ["label", "瓶贴"],
 ];
-const uses = [
+const photoUses = [
   ["hero", "主图"],
   ["scene", "场景"],
   ["poster", "海报"],
+];
+const labelUses = [
+  ["face", "正面贴"],
+  ["band", "环绕纹样"],
+  ["preview", "瓶身预览"],
 ];
 
 function chips(node, items, current, onPick) {
@@ -35,6 +41,12 @@ function chips(node, items, current, onPick) {
 }
 
 function renderChoices() {
+  const uses = state.category === "label" ? labelUses : photoUses;
+  if (!uses.some(([id]) => id === state.use)) state.use = uses[0][0];
+  $("labelNote").classList.toggle("hidden", state.category !== "label");
+  $("idea").placeholder = state.category === "label"
+    ? "品名用短词，例如：白茶精华。风格可以写：细线、留白、淡金。"
+    : "例如：夏天、干净、想要高级感。留空也可以。";
   chips($("categories"), categories, state.category, (id) => {
     state.category = id;
     renderChoices();
